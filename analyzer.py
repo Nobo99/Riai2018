@@ -135,20 +135,32 @@ def analyze(nn, LB_N0, UB_N0, label):
     ## construct input abstraction
     element = elina_abstract0_of_box(man, 0, num_pixels, itv)
     elina_interval_array_free(itv,num_pixels)
+    myflag = True
     for layerno in range(numlayer):
         if(nn.layertypes[layerno] in ['ReLU', 'Affine']):
+           if myflag:
 
-               myweights = nn.weights[nn.ffn_counter-1][0]
-               mybias = nn.biases[nn.ffn_counter-1]
+
+
                neuron = 0
+               myweights = nn.weights[nn.ffn_counter][neuron]
+               mybias = nn.biases[layerno][neuron]
+               print(mybias)
+
+
+
                mybounds = elina_abstract0_to_box(man,element)
                translate_neuron_to_ls(neuron, mybounds, myweights, mybias)
 
+
+
+
                for i in range(num_pixels):
+
                    inf = mybounds[i].contents.inf.contents.val.dbl
                    sup = mybounds[i].contents.sup.contents.val.dbl
-                   print(inf)
-                   print(sup)
+                  # print(inf)
+                 #  print(sup)
 
 
 
@@ -177,6 +189,17 @@ def analyze(nn, LB_N0, UB_N0, label):
                dimrem.contents.dim[i] = i
            elina_abstract0_remove_dimensions(man, True, element, dimrem)
            elina_dimchange_free(dimrem)
+
+           mybounds = elina_abstract0_to_box(man, element)
+
+           if myflag:
+               myflag = False
+               inf = mybounds[0].contents.inf.contents.val.dbl
+               sup = mybounds[0].contents.sup.contents.val.dbl
+               print("----box----")
+               print(inf)
+               print(sup)
+
            # handle ReLU layer
            if(nn.layertypes[layerno]=='ReLU'):
               element = relu_box_layerwise(man,True,element,0, num_out_pixels)
@@ -228,29 +251,45 @@ def translate_neuron_to_ls(neuron, bounds, weights, bias):
     lower_bounds = []
     upper_bounds = []
     min_model = Model("Neuron_" + str(neuron) + "_min")
-    #max_model = Model("Neuron_" + str(neuron) + "_max")
+    max_model = Model("Neuron_" + str(neuron) + "_max")
     size = len(weights)
 
     for i in range(0, size):
-        lower_bounds.append(bounds[i].contents.inf.contents.val.dbl)
-        upper_bounds.append(bounds[i].contents.sup.contents.val.dbl)
+       # print(i)
+        l = bounds[i].contents.inf.contents.val.dbl
+        u = bounds[i].contents.sup.contents.val.dbl
 
-    prev_layer_vars = min_model.addVars(size, lb=lower_bounds, ub=upper_bounds)
-    expr = LinExpr(0)
+        lower_bounds.append(l)
+        upper_bounds.append(u)
+
+    prev_layer_vars_min = min_model.addVars(size, lb=lower_bounds, ub=upper_bounds)
+    prev_layer_vars_max = max_model.addVars(size, lb=lower_bounds, ub=upper_bounds)
+    min_expr = LinExpr(0)
+    max_expr = LinExpr(0)
     for i in range(0, size):
-        var = min_model.addVar(vtype=GRB.BINARY, name="var" + str(i))
-        min_model.addConstr(prev_layer_vars[i] * weights[i] + bias[i], GRB.EQUAL, var)
-       # max_model.addConstr(prev_layer_vars[i] * weights[i] + bias[i], GRB.EQUAL, var)
-        expr.add(var)
-    min_model.setObjective(expr, GRB.MINIMIZE)
-    min_model.optimize()
-    #max_model.setObjective(expr, GRB.MAXIMIZE)
-    #max_model.optimize()
+        min_var = min_model.addVar(lb=-GRB.INFINITY,vtype=GRB.CONTINUOUS, name="var" + str(i))
+        max_var = max_model.addVar(lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name="var" + str(i))
+        min_model.addConstr(prev_layer_vars_min[i] * weights[i], GRB.EQUAL, min_var)
+        max_model.addConstr(prev_layer_vars_max[i] * weights[i], GRB.EQUAL, max_var)
+        min_expr.add(min_var)
+        max_expr.add(max_var)
 
-    lb = min_model.getVarByName("var")
-   # ob = max_model.getVarByName("var")
+    min_model.setObjective(min_expr+bias, GRB.MINIMIZE)
+    min_model.setParam("OutputFlag", False)
+    min_model.optimize()
+
+    #min_model.write("out.sol")
+    #min_model.write("out.mst")
+    #min_model.write("out.hnt")
+    max_model.setObjective(max_expr+bias, GRB.MAXIMIZE)
+    max_model.setParam("OutputFlag", False)
+    max_model.optimize()
+
+    lb = min_model.getAttr(GRB.Attr.ObjVal)
+    ob = max_model.getAttr(GRB.Attr.ObjVal)
+    print("-----gurobi-----")
     print(lb)
-   # print(ob)
+    print(ob)
 
 
 
