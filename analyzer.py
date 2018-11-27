@@ -90,7 +90,7 @@ def parse_net(text):
         else:
             raise Exception('parse error: '+lines[i])
     return res
-   
+
 def parse_spec(text):
     text = text.replace("[", "")
     text = text.replace("]", "")
@@ -106,7 +106,7 @@ def get_perturbed_image(x, epsilon):
     num_pixels = len(image)
     LB_N0 = image - epsilon
     UB_N0 = image + epsilon
-     
+
     for i in range(num_pixels):
         if(LB_N0[i] < 0):
             LB_N0[i] = 0
@@ -123,10 +123,10 @@ def generate_linexpr0(weights, bias, size):
         elina_linexpr0_set_coeff_scalar_double(linexpr0,i,weights[i])
     return linexpr0
 
-def analyze(nn, LB_N0, UB_N0, label):   
+def analyze(nn, LB_N0, UB_N0, label):
     num_pixels = len(LB_N0)
     nn.ffn_counter = 0
-    numlayer = nn.numlayer 
+    numlayer = nn.numlayer
     man = elina_box_manager_alloc()
     itv = elina_interval_array_alloc(num_pixels)
     for i in range(num_pixels):
@@ -138,11 +138,17 @@ def analyze(nn, LB_N0, UB_N0, label):
     for layerno in range(numlayer):
         if(nn.layertypes[layerno] in ['ReLU', 'Affine']):
 
-           myweights = nn.weights[nn.ffn_counter-1][0]
-           mybias = nn.biases[nn.ffn_counter-1]
-           neuron = 0
-           mybounds = elina_abstract0_to_box(man,element)
-           translate_neuron_to_ls(neuron, mybounds, myweights, mybias)
+               myweights = nn.weights[nn.ffn_counter-1][0]
+               mybias = nn.biases[nn.ffn_counter-1]
+               neuron = 0
+               mybounds = elina_abstract0_to_box(man,element)
+               translate_neuron_to_ls(neuron, mybounds, myweights, mybias)
+
+               for i in range(num_pixels):
+                   inf = mybounds[i].contents.inf.contents.val.dbl
+                   sup = mybounds[i].contents.sup.contents.val.dbl
+                   print(inf)
+                   print(sup)
 
 
 
@@ -152,7 +158,7 @@ def analyze(nn, LB_N0, UB_N0, label):
            num_in_pixels = dims.intdim + dims.realdim
            num_out_pixels = len(weights)
 
-           dimadd = elina_dimchange_alloc(0,num_out_pixels)    
+           dimadd = elina_dimchange_alloc(0,num_out_pixels)
            for i in range(num_out_pixels):
                dimadd.contents.dim[i] = num_in_pixels
            elina_abstract0_add_dimensions(man, True, element, dimadd, False)
@@ -171,7 +177,7 @@ def analyze(nn, LB_N0, UB_N0, label):
                dimrem.contents.dim[i] = i
            elina_abstract0_remove_dimensions(man, True, element, dimrem)
            elina_dimchange_free(dimrem)
-           # handle ReLU layer 
+           # handle ReLU layer
            if(nn.layertypes[layerno]=='ReLU'):
               element = relu_box_layerwise(man,True,element,0, num_out_pixels)
            nn.ffn_counter+=1
@@ -179,15 +185,15 @@ def analyze(nn, LB_N0, UB_N0, label):
 
         else:
            print(' net type not supported')
-   
+
     dims = elina_abstract0_dimension(man,element)
     output_size = dims.intdim + dims.realdim
     # get bounds for each output neuron
     bounds = elina_abstract0_to_box(man,element)
 
-           
-    # if epsilon is zero, try to classify else verify robustness 
-    
+
+    # if epsilon is zero, try to classify else verify robustness
+
     verified_flag = True
     predicted_label = 0
     if(LB_N0[0]==UB_N0[0]):
@@ -202,7 +208,7 @@ def analyze(nn, LB_N0, UB_N0, label):
                       break
             if(flag):
                 predicted_label = i
-                break    
+                break
     else:
         inf = bounds[label].contents.inf.contents.val.dbl
         for j in range(output_size):
@@ -215,15 +221,14 @@ def analyze(nn, LB_N0, UB_N0, label):
 
     elina_interval_array_free(bounds,output_size)
     elina_abstract0_free(man,element)
-    elina_manager_free(man)        
+    elina_manager_free(man)
     return predicted_label, verified_flag
-
 
 def translate_neuron_to_ls(neuron, bounds, weights, bias):
     lower_bounds = []
     upper_bounds = []
     min_model = Model("Neuron_" + str(neuron) + "_min")
-    max_model = Model("Neuron_" + str(neuron) + "_max")
+    #max_model = Model("Neuron_" + str(neuron) + "_max")
     size = len(weights)
 
     for i in range(0, size):
@@ -234,18 +239,18 @@ def translate_neuron_to_ls(neuron, bounds, weights, bias):
     expr = LinExpr(0)
     for i in range(0, size):
         var = min_model.addVar(vtype=GRB.BINARY, name="var" + str(i))
-        min_model.addConstr(prev_layer_vars[i] * weights[i] + bias, GRB.EQUAL, var)
-        max_model.addConstr(prev_layer_vars[i] * weights[i] + bias, GRB.EQUAL, var)
-        expr.add(min_var)
+        min_model.addConstr(prev_layer_vars[i] * weights[i] + bias[i], GRB.EQUAL, var)
+       # max_model.addConstr(prev_layer_vars[i] * weights[i] + bias[i], GRB.EQUAL, var)
+        expr.add(var)
     min_model.setObjective(expr, GRB.MINIMIZE)
     min_model.optimize()
-    max_model.setObjective(expr, GRB.MAXIMIZE)
-    max_model.optimize()
+    #max_model.setObjective(expr, GRB.MAXIMIZE)
+    #max_model.optimize()
 
     lb = min_model.getVarByName("var")
-    ob = max_model.getVarByName("var")
+   # ob = max_model.getVarByName("var")
     print(lb)
-    print(ob)
+   # print(ob)
 
 
 
@@ -266,7 +271,7 @@ if __name__ == '__main__':
     nn = parse_net(netstring)
     x0_low, x0_high = parse_spec(specstring)
     LB_N0, UB_N0 = get_perturbed_image(x0_low,0)
-    
+
     label, _ = analyze(nn,LB_N0,UB_N0,0)
     start = time.time()
     if(label==int(x0_low[0])):
@@ -275,10 +280,10 @@ if __name__ == '__main__':
         if(verified_flag):
             print("verified")
         else:
-            print("can not be verified")  
+            print("can not be verified")
     else:
         print("image not correctly classified by the network. expected label ",int(x0_low[0]), " classified label: ", label)
     end = time.time()
     print("analysis time: ", (end-start), " seconds")
-    
+
 
